@@ -4,10 +4,11 @@ import os
 import torch
 from accelerate import Accelerator
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training, set_peft_model_state_dict
+from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training, prepare_model_for_kbit_training, set_peft_model_state_dict
 from torch.utils.data import IterableDataset
 from tqdm import tqdm
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, logging, set_seed
+import bitsandbytes
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, logging, set_seed, BitsAndBytesConfig
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
@@ -86,6 +87,8 @@ def get_args():
     parser.add_argument("--log_freq", default=100, type=int)
     parser.add_argument("--eval_freq", default=100, type=int)
     parser.add_argument("--save_freq", default=1000, type=int)
+
+    parser.add_argument("--qlora", action="store_true")
 
     return parser.parse_args()
 
@@ -236,15 +239,33 @@ def create_datasets(tokenizer, args):
 
 def run_training(args, train_data, val_data):
     print("Loading the model")
-    # disable caching mechanism when using gradient checkpointing
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_path,
-        use_auth_token=True,
-        use_cache=not args.no_gradient_checkpointing,
-        load_in_8bit=True,
-        device_map={"": Accelerator().process_index},
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
     )
-    model = prepare_model_for_int8_training(model)
+
+    # disable caching mechanism when using gradient checkpointing
+    if args.qlora:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_path,
+            use_auth_token=True,
+            use_cache=not args.no_gradient_checkpointing,
+            quantization_config=bnb_config,
+            device_map={"": Accelerator().process_index},    # or maybe "auto"? but do it only when the corresponding runtime error occurs.
+        )
+        model = prepare_model_for_kbit_training(model)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_path,
+            use_auth_token=True,
+            use_cache=not args.no_gradient_checkpointing,
+            load_in_8bit=True,
+            device_map={"": Accelerator().process_index},
+        )
+        model = prepare_model_for_int8_training(model)
 
     lora_config = LoraConfig(
         r=args.lora_r,
