@@ -53,6 +53,9 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, default="bigcode/large-model")
     parser.add_argument("--dataset_name", type=str, default="HuggingFaceH4/CodeAlpaca_20K")
+
+    parser.add_argument("--dataset_local_pathname", type=str)
+    
     parser.add_argument("--subset", type=str)
     parser.add_argument("--split", type=str)
     parser.add_argument("--size_valid_set", type=int, default=10000)
@@ -198,6 +201,7 @@ def create_datasets(tokenizer, args):
     dataset = load_dataset(
         args.dataset_name,
         data_dir=args.subset,
+        data_files=args.dataset_local_pathname,
         split=args.split,
         use_auth_token=True,
         num_proc=args.num_workers if not args.streaming else None,
